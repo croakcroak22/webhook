@@ -13,6 +13,11 @@ export const useWebhooks = () => {
   const loadWebhooks = useCallback(async () => {
     try {
       const response = await fetch(API_BASE);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const data = await response.json();
       
       if (data.success) {
@@ -36,6 +41,8 @@ export const useWebhooks = () => {
       }
     } catch (error) {
       console.error('Error cargando webhooks:', error);
+      // Set empty array on error to prevent UI issues
+      setWebhooks([]);
     }
   }, []);
 
@@ -43,6 +50,11 @@ export const useWebhooks = () => {
   const loadLogs = useCallback(async () => {
     try {
       const response = await fetch(`${API_BASE}/logs/all`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const data = await response.json();
       
       if (data.success) {
@@ -50,6 +62,8 @@ export const useWebhooks = () => {
       }
     } catch (error) {
       console.error('Error cargando logs:', error);
+      // Set empty array on error to prevent UI issues
+      setLogs([]);
     }
   }, []);
 
@@ -74,6 +88,10 @@ export const useWebhooks = () => {
         },
         body: JSON.stringify(payload),
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
       const data = await response.json();
       
@@ -100,6 +118,10 @@ export const useWebhooks = () => {
         },
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
       
       if (data.success) {
@@ -121,6 +143,10 @@ export const useWebhooks = () => {
         method: 'DELETE',
       });
 
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
       
       if (data.success) {
@@ -133,7 +159,7 @@ export const useWebhooks = () => {
       console.error('Error eliminando webhook:', error);
       return false;
     }
-  }, [loadWebhooks, loadLogs]);
+  }, []);
 
   // Actualizar webhook (placeholder para compatibilidad)
   const updateWebhook = useCallback((id: string, updates: Partial<WebhookData>) => {
