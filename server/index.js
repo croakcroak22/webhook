@@ -38,6 +38,10 @@ app.use(morgan('combined'));
 // Función para inicializar el servidor
 const startServer = async () => {
   try {
+    console.log('🚀 Iniciando servidor...');
+    console.log('📍 Directorio actual:', __dirname);
+    console.log('🌍 Entorno:', process.env.NODE_ENV || 'development');
+    
     // Inicializar base de datos
     console.log('🔄 Inicializando base de datos...');
     await initDatabase();
@@ -51,8 +55,40 @@ const startServer = async () => {
       res.json({ 
         status: 'OK', 
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        database: 'SQLite',
+        environment: process.env.NODE_ENV || 'development'
       });
+    });
+
+    // Endpoint de información de la base de datos
+    app.get('/api/db-info', async (req, res) => {
+      try {
+        const { dbAll } = await import('./database/init.js');
+        
+        const tables = await dbAll(`
+          SELECT name FROM sqlite_master 
+          WHERE type='table' AND name NOT LIKE 'sqlite_%'
+        `);
+        
+        const webhookCount = await dbAll(`SELECT COUNT(*) as count FROM webhooks`);
+        const logCount = await dbAll(`SELECT COUNT(*) as count FROM webhook_logs`);
+        
+        res.json({
+          success: true,
+          database: 'SQLite',
+          tables: tables.map(t => t.name),
+          counts: {
+            webhooks: webhookCount[0]?.count || 0,
+            logs: logCount[0]?.count || 0
+          }
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
     });
 
     // Servir archivos estáticos en producción
@@ -66,7 +102,8 @@ const startServer = async () => {
 
     // Manejo de errores global
     app.use((err, req, res, next) => {
-      console.error('Error:', err);
+      console.error('❌ Error global:', err);
+      console.error('Stack:', err.stack);
       res.status(500).json({
         success: false,
         message: 'Error interno del servidor',
@@ -76,22 +113,28 @@ const startServer = async () => {
 
     // Manejo de rutas no encontradas
     app.use('*', (req, res) => {
+      console.log('❌ Ruta no encontrada:', req.originalUrl);
       res.status(404).json({
         success: false,
-        message: 'Endpoint no encontrado'
+        message: 'Endpoint no encontrado',
+        path: req.originalUrl
       });
     });
 
     // Programar verificación de webhooks cada minuto
     console.log('⏰ Configurando scheduler...');
     cron.schedule('* * * * *', () => {
+      console.log('⏰ Ejecutando verificación de webhooks programados...');
       checkScheduledWebhooks();
     });
 
     // Iniciar servidor
     const server = app.listen(PORT, () => {
+      console.log('🎉 ¡Servidor iniciado exitosamente!');
       console.log(`🚀 Servidor ejecutándose en puerto ${PORT}`);
       console.log(`📡 API disponible en http://localhost:${PORT}/api`);
+      console.log(`🏥 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📊 DB info: http://localhost:${PORT}/api/db-info`);
       console.log(`⏰ Scheduler activo - verificando webhooks cada minuto`);
     });
 
