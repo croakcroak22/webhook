@@ -200,12 +200,9 @@ export const useWebhooks = () => {
   // Eliminar todos los webhooks
   const deleteAllWebhooks = useCallback(async (confirmation: string) => {
     try {
-      const response = await fetch(`${API_BASE}/bulk/all`, {
+      const params = new URLSearchParams({ confirmation });
+      const response = await fetch(`${API_BASE}/bulk/all?${params}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ confirmation }),
       });
 
       if (!response.ok) {
@@ -281,12 +278,9 @@ export const useWebhooks = () => {
   // Vaciar papelera
   const emptyTrash = useCallback(async (confirmation: string) => {
     try {
-      const response = await fetch(`${API_BASE}/trash/empty`, {
+      const params = new URLSearchParams({ confirmation });
+      const response = await fetch(`${API_BASE}/trash/empty?${params}`, {
         method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ confirmation }),
       });
 
       if (!response.ok) {

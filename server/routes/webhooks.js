@@ -236,7 +236,7 @@ router.delete('/:id', async (req, res) => {
 // Eliminar todos los webhooks (mover a papelera)
 router.delete('/bulk/all', async (req, res) => {
   try {
-    const { confirmation } = req.body;
+    const { confirmation } = req.query;
     
     if (confirmation !== 'DELETE ALL WEBHOOKS') {
       return res.status(400).json({
@@ -350,7 +350,7 @@ router.delete('/:id/permanent', async (req, res) => {
 // Vaciar papelera completamente
 router.delete('/trash/empty', async (req, res) => {
   try {
-    const { confirmation } = req.body;
+    const { confirmation } = req.query;
     
     if (confirmation !== 'EMPTY TRASH') {
       return res.status(400).json({
