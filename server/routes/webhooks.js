@@ -1,102 +1,34 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { dbRun, dbGet, dbAll } from '../database/init.js';
-import { validateWebhookData } from '../utils/validation.js';
+import { dbGet, dbAll, dbRun } from '../database/init.js';
+import { validateWebhookPayload } from '../utils/validation.js';
 import { executeWebhook } from '../services/webhookExecutor.js';
 
 const router = express.Router();
 
-// Recibir webhook desde n8n
-router.post('/receive', async (req, res) => {
-  try {
-    console.log('📥 Webhook recibido desde n8n:', req.body);
-    
-    // Validar datos
-    const validation = validateWebhookData(req.body);
-    if (!validation.isValid) {
-      return res.status(400).json({
-        success: false,
-        message: 'Datos inválidos',
-        errors: validation.errors
-      });
-    }
-
-    const webhookId = uuidv4();
-    const now = new Date();
-
-    // Guardar webhook en la base de datos
-    await dbRun(`
-      INSERT INTO webhooks (
-        id, name, scheduled_date, scheduled_time, webhook_url, 
-        message, leads, tags, status, created_at, max_retries
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10)
-    `, [
-      webhookId,
-      req.body.name,
-      req.body.scheduledDate,
-      req.body.scheduledTime,
-      req.body.webhookUrl,
-      req.body.message,
-      JSON.stringify(req.body.leads),
-      JSON.stringify(req.body.tags || []),
-      now,
-      req.body.maxRetries || 3
-    ]);
-
-    // Log de creación
-    await dbRun(`
-      INSERT INTO webhook_logs (id, webhook_id, status, message)
-      VALUES ($1, $2, 'success', $3)
-    `, [
-      uuidv4(),
-      webhookId,
-      `Webhook creado desde n8n: ${req.body.name}`
-    ]);
-
-    console.log(`✅ Webhook guardado: ${webhookId}`);
-
-    res.json({
-      success: true,
-      message: 'Webhook programado exitosamente',
-      webhookId,
-      scheduledFor: `${req.body.scheduledDate} ${req.body.scheduledTime}`
-    });
-
-  } catch (error) {
-    console.error('❌ Error procesando webhook:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error interno del servidor',
-      error: error.message
-    });
-  }
-});
-
-// Obtener todos los webhooks (solo activos)
+// Obtener todos los webhooks activos
 router.get('/', async (req, res) => {
   try {
+    console.log('📋 Obteniendo webhooks activos...');
+    
     const webhooks = await dbAll(`
       SELECT * FROM webhooks 
-      WHERE is_deleted = FALSE
+      WHERE deleted_at IS NULL 
       ORDER BY created_at DESC
     `);
-
-    // Parsear JSON fields
-    const parsedWebhooks = webhooks.map(webhook => ({
-      ...webhook,
-      leads: typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [],
-      tags: typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || []
-    }));
-
+    
+    console.log(`✅ Encontrados ${webhooks.length} webhooks activos`);
+    
     res.json({
       success: true,
-      webhooks: parsedWebhooks
+      webhooks
     });
   } catch (error) {
-    console.error('Error obteniendo webhooks:', error);
+    console.error('❌ Error obteniendo webhooks:', error);
     res.status(500).json({
       success: false,
-      message: 'Error obteniendo webhooks'
+      message: 'Error obteniendo webhooks',
+      error: error.message
     });
   }
 });
@@ -104,59 +36,145 @@ router.get('/', async (req, res) => {
 // Obtener webhooks eliminados (papelera)
 router.get('/trash', async (req, res) => {
   try {
+    console.log('🗑️ Obteniendo webhooks eliminados...');
+    
     const webhooks = await dbAll(`
       SELECT * FROM webhooks 
-      WHERE is_deleted = TRUE
+      WHERE deleted_at IS NOT NULL 
       ORDER BY deleted_at DESC
     `);
-
-    // Parsear JSON fields
-    const parsedWebhooks = webhooks.map(webhook => ({
-      ...webhook,
-      leads: typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [],
-      tags: typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || []
-    }));
-
+    
+    console.log(`✅ Encontrados ${webhooks.length} webhooks eliminados`);
+    
     res.json({
       success: true,
-      webhooks: parsedWebhooks
+      webhooks
     });
   } catch (error) {
-    console.error('Error obteniendo webhooks eliminados:', error);
+    console.error('❌ Error obteniendo webhooks eliminados:', error);
     res.status(500).json({
       success: false,
-      message: 'Error obteniendo webhooks eliminados'
+      message: 'Error obteniendo webhooks eliminados',
+      error: error.message
     });
   }
 });
 
-// Obtener webhook por ID
-router.get('/:id', async (req, res) => {
+// Obtener todos los logs
+router.get('/logs/all', async (req, res) => {
   try {
-    const webhook = await dbGet(`
-      SELECT * FROM webhooks WHERE id = $1 AND is_deleted = FALSE
-    `, [req.params.id]);
+    console.log('📊 Obteniendo todos los logs...');
+    
+    const logs = await dbAll(`
+      SELECT 
+        wl.*,
+        w.name as webhook_name
+      FROM webhook_logs wl
+      LEFT JOIN webhooks w ON wl.webhook_id = w.id
+      ORDER BY wl.created_at DESC
+      LIMIT 1000
+    `);
+    
+    console.log(`✅ Encontrados ${logs.length} logs`);
+    
+    res.json({
+      success: true,
+      logs
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo logs:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error obteniendo logs',
+      error: error.message
+    });
+  }
+});
 
-    if (!webhook) {
-      return res.status(404).json({
+// Obtener logs de un webhook específico
+router.get('/:id/logs', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`📊 Obteniendo logs para webhook ${id}...`);
+    
+    const logs = await dbAll(`
+      SELECT * FROM webhook_logs 
+      WHERE webhook_id = ? 
+      ORDER BY created_at DESC
+    `, [id]);
+    
+    console.log(`✅ Encontrados ${logs.length} logs para webhook ${id}`);
+    
+    res.json({
+      success: true,
+      logs
+    });
+  } catch (error) {
+    console.error('❌ Error obteniendo logs del webhook:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error obteniendo logs del webhook',
+      error: error.message
+    });
+  }
+});
+
+// Recibir webhook desde n8n
+router.post('/receive', async (req, res) => {
+  try {
+    console.log('📨 Webhook recibido desde n8n:', req.body);
+    
+    const validation = validateWebhookPayload(req.body);
+    if (!validation.isValid) {
+      console.error('❌ Payload inválido:', validation.errors);
+      return res.status(400).json({
         success: false,
-        message: 'Webhook no encontrado'
+        message: 'Payload inválido',
+        errors: validation.errors
       });
     }
 
-    // Parsear JSON fields
-    webhook.leads = typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [];
-    webhook.tags = typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || [];
+    const webhookData = validation.data;
+    const webhookId = uuidv4();
+
+    // Guardar webhook en la base de datos
+    await dbRun(`
+      INSERT INTO webhooks (
+        id, name, scheduled_date, scheduled_time, webhook_url, 
+        message, leads, tags, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)
+    `, [
+      webhookId,
+      webhookData.name,
+      webhookData.scheduledDate,
+      webhookData.scheduledTime,
+      webhookData.webhookUrl,
+      webhookData.message || null,
+      JSON.stringify(webhookData.leads || []),
+      JSON.stringify(webhookData.tags || [])
+    ]);
+
+    // Crear log inicial
+    await dbRun(`
+      INSERT INTO webhook_logs (webhook_id, status, message, created_at)
+      VALUES (?, 'received', 'Webhook recibido y programado', CURRENT_TIMESTAMP)
+    `, [webhookId]);
+
+    console.log(`✅ Webhook ${webhookId} guardado exitosamente`);
 
     res.json({
       success: true,
-      webhook
+      message: 'Webhook recibido y programado exitosamente',
+      webhookId,
+      scheduledFor: `${webhookData.scheduledDate} ${webhookData.scheduledTime}`
     });
+
   } catch (error) {
-    console.error('Error obteniendo webhook:', error);
+    console.error('❌ Error procesando webhook:', error);
     res.status(500).json({
       success: false,
-      message: 'Error obteniendo webhook'
+      message: 'Error procesando webhook',
+      error: error.message
     });
   }
 });
@@ -164,10 +182,11 @@ router.get('/:id', async (req, res) => {
 // Ejecutar webhook manualmente
 router.post('/:id/execute', async (req, res) => {
   try {
-    const webhook = await dbGet(`
-      SELECT * FROM webhooks WHERE id = $1 AND is_deleted = FALSE
-    `, [req.params.id]);
-
+    const { id } = req.params;
+    console.log(`🚀 Ejecutando webhook ${id} manualmente...`);
+    
+    const webhook = await dbGet('SELECT * FROM webhooks WHERE id = ?', [id]);
+    
     if (!webhook) {
       return res.status(404).json({
         success: false,
@@ -175,21 +194,27 @@ router.post('/:id/execute', async (req, res) => {
       });
     }
 
-    // Parsear JSON fields
-    webhook.leads = typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [];
-    webhook.tags = typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || [];
+    if (webhook.deleted_at) {
+      return res.status(400).json({
+        success: false,
+        message: 'No se puede ejecutar un webhook eliminado'
+      });
+    }
 
     const result = await executeWebhook(webhook, true);
-
+    
     res.json({
       success: result.success,
-      message: result.message
+      message: result.message,
+      executionTime: result.executionTime
     });
+
   } catch (error) {
-    console.error('Error ejecutando webhook:', error);
+    console.error('❌ Error ejecutando webhook:', error);
     res.status(500).json({
       success: false,
-      message: 'Error ejecutando webhook'
+      message: 'Error ejecutando webhook',
+      error: error.message
     });
   }
 });
@@ -197,80 +222,50 @@ router.post('/:id/execute', async (req, res) => {
 // Eliminar webhook (mover a papelera)
 router.delete('/:id', async (req, res) => {
   try {
-    const result = await dbRun(`
-      UPDATE webhooks 
-      SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP 
-      WHERE id = $1 AND is_deleted = FALSE
-    `, [req.params.id]);
-
-    if (result.rowCount === 0) {
+    const { id } = req.params;
+    console.log(`🗑️ Moviendo webhook ${id} a papelera...`);
+    
+    const webhook = await dbGet('SELECT * FROM webhooks WHERE id = ?', [id]);
+    
+    if (!webhook) {
       return res.status(404).json({
         success: false,
         message: 'Webhook no encontrado'
       });
     }
 
-    // Log de eliminación
-    await dbRun(`
-      INSERT INTO webhook_logs (id, webhook_id, status, message)
-      VALUES ($1, $2, 'info', $3)
-    `, [
-      uuidv4(),
-      req.params.id,
-      'Webhook movido a papelera'
-    ]);
-
-    res.json({
-      success: true,
-      message: 'Webhook movido a papelera'
-    });
-  } catch (error) {
-    console.error('Error eliminando webhook:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error eliminando webhook'
-    });
-  }
-});
-
-// Eliminar todos los webhooks (mover a papelera)
-router.delete('/bulk/all', async (req, res) => {
-  try {
-    const { confirmation } = req.query;
-    
-    if (confirmation !== 'DELETE ALL WEBHOOKS') {
+    if (webhook.deleted_at) {
       return res.status(400).json({
         success: false,
-        message: 'Confirmación incorrecta'
+        message: 'El webhook ya está eliminado'
       });
     }
 
-    const result = await dbRun(`
-      UPDATE webhooks 
-      SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP 
-      WHERE is_deleted = FALSE
-    `);
-
-    // Log de eliminación masiva
     await dbRun(`
-      INSERT INTO webhook_logs (id, webhook_id, status, message)
-      VALUES ($1, $2, 'info', $3)
-    `, [
-      uuidv4(),
-      'bulk-delete',
-      `Eliminación masiva: ${result.rowCount} webhooks movidos a papelera`
-    ]);
+      UPDATE webhooks 
+      SET deleted_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `, [id]);
+
+    // Crear log
+    await dbRun(`
+      INSERT INTO webhook_logs (webhook_id, status, message, created_at)
+      VALUES (?, 'deleted', 'Webhook movido a papelera', CURRENT_TIMESTAMP)
+    `, [id]);
+
+    console.log(`✅ Webhook ${id} movido a papelera`);
 
     res.json({
       success: true,
-      message: `${result.rowCount} webhooks movidos a papelera`,
-      count: result.rowCount
+      message: 'Webhook movido a papelera exitosamente'
     });
+
   } catch (error) {
-    console.error('Error eliminando todos los webhooks:', error);
+    console.error('❌ Error eliminando webhook:', error);
     res.status(500).json({
       success: false,
-      message: 'Error eliminando webhooks'
+      message: 'Error eliminando webhook',
+      error: error.message
     });
   }
 });
@@ -278,165 +273,174 @@ router.delete('/bulk/all', async (req, res) => {
 // Restaurar webhook desde papelera
 router.post('/:id/restore', async (req, res) => {
   try {
-    const result = await dbRun(`
-      UPDATE webhooks 
-      SET is_deleted = FALSE, deleted_at = NULL 
-      WHERE id = $1 AND is_deleted = TRUE
-    `, [req.params.id]);
-
-    if (result.rowCount === 0) {
+    const { id } = req.params;
+    console.log(`♻️ Restaurando webhook ${id}...`);
+    
+    const webhook = await dbGet('SELECT * FROM webhooks WHERE id = ?', [id]);
+    
+    if (!webhook) {
       return res.status(404).json({
         success: false,
-        message: 'Webhook no encontrado en papelera'
+        message: 'Webhook no encontrado'
       });
     }
 
-    // Log de restauración
+    if (!webhook.deleted_at) {
+      return res.status(400).json({
+        success: false,
+        message: 'El webhook no está eliminado'
+      });
+    }
+
     await dbRun(`
-      INSERT INTO webhook_logs (id, webhook_id, status, message)
-      VALUES ($1, $2, 'info', $3)
-    `, [
-      uuidv4(),
-      req.params.id,
-      'Webhook restaurado desde papelera'
-    ]);
+      UPDATE webhooks 
+      SET deleted_at = NULL 
+      WHERE id = ?
+    `, [id]);
+
+    // Crear log
+    await dbRun(`
+      INSERT INTO webhook_logs (webhook_id, status, message, created_at)
+      VALUES (?, 'restored', 'Webhook restaurado desde papelera', CURRENT_TIMESTAMP)
+    `, [id]);
+
+    console.log(`✅ Webhook ${id} restaurado exitosamente`);
 
     res.json({
       success: true,
       message: 'Webhook restaurado exitosamente'
     });
+
   } catch (error) {
-    console.error('Error restaurando webhook:', error);
+    console.error('❌ Error restaurando webhook:', error);
     res.status(500).json({
       success: false,
-      message: 'Error restaurando webhook'
+      message: 'Error restaurando webhook',
+      error: error.message
     });
   }
 });
 
-// Eliminar permanentemente webhook
+// Eliminar webhook permanentemente
 router.delete('/:id/permanent', async (req, res) => {
   try {
-    // Eliminar logs relacionados primero
-    await dbRun(`
-      DELETE FROM webhook_logs WHERE webhook_id = $1
-    `, [req.params.id]);
-
-    // Eliminar webhook permanentemente
-    const result = await dbRun(`
-      DELETE FROM webhooks WHERE id = $1 AND is_deleted = TRUE
-    `, [req.params.id]);
-
-    if (result.rowCount === 0) {
+    const { id } = req.params;
+    console.log(`💀 Eliminando webhook ${id} permanentemente...`);
+    
+    const webhook = await dbGet('SELECT * FROM webhooks WHERE id = ?', [id]);
+    
+    if (!webhook) {
       return res.status(404).json({
         success: false,
-        message: 'Webhook no encontrado en papelera'
+        message: 'Webhook no encontrado'
       });
     }
+
+    // Eliminar logs relacionados
+    await dbRun('DELETE FROM webhook_logs WHERE webhook_id = ?', [id]);
+    
+    // Eliminar webhook
+    await dbRun('DELETE FROM webhooks WHERE id = ?', [id]);
+
+    console.log(`✅ Webhook ${id} eliminado permanentemente`);
 
     res.json({
       success: true,
       message: 'Webhook eliminado permanentemente'
     });
+
   } catch (error) {
-    console.error('Error eliminando webhook permanentemente:', error);
+    console.error('❌ Error eliminando webhook permanentemente:', error);
     res.status(500).json({
       success: false,
-      message: 'Error eliminando webhook permanentemente'
+      message: 'Error eliminando webhook permanentemente',
+      error: error.message
     });
   }
 });
 
-// Vaciar papelera completamente
+// Eliminar todos los webhooks
+router.delete('/bulk/all', async (req, res) => {
+  try {
+    const { confirmation } = req.query;
+    
+    if (confirmation !== 'DELETE_ALL_WEBHOOKS') {
+      return res.status(400).json({
+        success: false,
+        message: 'Confirmación requerida'
+      });
+    }
+
+    console.log('💀 Eliminando todos los webhooks...');
+    
+    // Mover todos los webhooks activos a papelera
+    const result = await dbRun(`
+      UPDATE webhooks 
+      SET deleted_at = CURRENT_TIMESTAMP 
+      WHERE deleted_at IS NULL
+    `);
+
+    console.log(`✅ ${result.changes} webhooks movidos a papelera`);
+
+    res.json({
+      success: true,
+      message: `${result.changes} webhooks movidos a papelera`,
+      deletedCount: result.changes
+    });
+
+  } catch (error) {
+    console.error('❌ Error eliminando todos los webhooks:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error eliminando todos los webhooks',
+      error: error.message
+    });
+  }
+});
+
+// Vaciar papelera
 router.delete('/trash/empty', async (req, res) => {
   try {
     const { confirmation } = req.query;
     
-    if (confirmation !== 'EMPTY TRASH') {
+    if (confirmation !== 'EMPTY_TRASH') {
       return res.status(400).json({
         success: false,
-        message: 'Confirmación incorrecta'
+        message: 'Confirmación requerida'
       });
     }
 
-    // Obtener IDs de webhooks en papelera
+    console.log('🗑️ Vaciando papelera...');
+    
+    // Obtener IDs de webhooks eliminados
     const trashedWebhooks = await dbAll(`
-      SELECT id FROM webhooks WHERE is_deleted = TRUE
+      SELECT id FROM webhooks WHERE deleted_at IS NOT NULL
     `);
 
-    // Eliminar logs de webhooks en papelera
+    // Eliminar logs de webhooks eliminados
     for (const webhook of trashedWebhooks) {
-      await dbRun(`
-        DELETE FROM webhook_logs WHERE webhook_id = $1
-      `, [webhook.id]);
+      await dbRun('DELETE FROM webhook_logs WHERE webhook_id = ?', [webhook.id]);
     }
-
+    
     // Eliminar webhooks permanentemente
     const result = await dbRun(`
-      DELETE FROM webhooks WHERE is_deleted = TRUE
+      DELETE FROM webhooks WHERE deleted_at IS NOT NULL
     `);
+
+    console.log(`✅ ${result.changes} webhooks eliminados permanentemente`);
 
     res.json({
       success: true,
-      message: `${result.rowCount} webhooks eliminados permanentemente`,
-      count: result.rowCount
+      message: `${result.changes} webhooks eliminados permanentemente`,
+      deletedCount: result.changes
     });
+
   } catch (error) {
-    console.error('Error vaciando papelera:', error);
+    console.error('❌ Error vaciando papelera:', error);
     res.status(500).json({
       success: false,
-      message: 'Error vaciando papelera'
-    });
-  }
-});
-
-// Obtener logs
-router.get('/logs/all', async (req, res) => {
-  try {
-    const logs = await dbAll(`
-      SELECT wl.*, w.name as webhook_name
-      FROM webhook_logs wl
-      LEFT JOIN webhooks w ON wl.webhook_id = w.id
-      ORDER BY wl.timestamp DESC
-      LIMIT 100
-    `);
-
-    res.json({
-      success: true,
-      logs
-    });
-  } catch (error) {
-    console.error('Error obteniendo logs:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error obteniendo logs'
-    });
-  }
-});
-
-// Obtener estadísticas
-router.get('/stats/summary', async (req, res) => {
-  try {
-    const stats = await dbGet(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'pending' AND is_deleted = FALSE THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN status = 'sent' AND is_deleted = FALSE THEN 1 ELSE 0 END) as sent,
-        SUM(CASE WHEN status = 'failed' AND is_deleted = FALSE THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN status = 'cancelled' AND is_deleted = FALSE THEN 1 ELSE 0 END) as cancelled,
-        SUM(CASE WHEN is_deleted = TRUE THEN 1 ELSE 0 END) as deleted
-      FROM webhooks
-    `);
-
-    res.json({
-      success: true,
-      stats
-    });
-  } catch (error) {
-    console.error('Error obteniendo estadísticas:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error obteniendo estadísticas'
+      message: 'Error vaciando papelera',
+      error: error.message
     });
   }
 });

@@ -9,29 +9,34 @@ export const checkScheduledWebhooks = async () => {
     
     console.log(`⏰ Verificando webhooks programados para ${currentDate} ${currentTime}`);
 
-    // Buscar webhooks que deben ejecutarse
+    // Buscar webhooks que deben ejecutarse ahora
     const webhooksToExecute = await dbAll(`
       SELECT * FROM webhooks 
       WHERE status = 'pending' 
-      AND (
-        scheduled_date < ? OR 
-        (scheduled_date = ? AND scheduled_time <= ?)
-      )
-    `, [currentDate, currentDate, currentTime]);
+      AND deleted_at IS NULL
+      AND scheduled_date = ? 
+      AND scheduled_time <= ?
+      AND (retry_count IS NULL OR retry_count < max_retries)
+    `, [currentDate, currentTime]);
 
-    if (webhooksToExecute.length > 0) {
-      console.log(`🎯 Encontrados ${webhooksToExecute.length} webhooks para ejecutar`);
-      
-      for (const webhook of webhooksToExecute) {
-        // Parsear JSON fields
-        webhook.leads = JSON.parse(webhook.leads);
-        webhook.tags = JSON.parse(webhook.tags || '[]');
-        
-        console.log(`🚀 Ejecutando webhook: ${webhook.name} (${webhook.id})`);
+    if (webhooksToExecute.length === 0) {
+      console.log('⏰ No hay webhooks programados para ejecutar en este momento');
+      return;
+    }
+
+    console.log(`⏰ Encontrados ${webhooksToExecute.length} webhooks para ejecutar`);
+
+    // Ejecutar cada webhook
+    for (const webhook of webhooksToExecute) {
+      try {
+        console.log(`⏰ Ejecutando webhook programado: ${webhook.name} (${webhook.id})`);
         await executeWebhook(webhook, false);
+      } catch (error) {
+        console.error(`❌ Error ejecutando webhook programado ${webhook.id}:`, error);
       }
     }
+
   } catch (error) {
-    console.error('❌ Error en scheduler:', error);
+    console.error('❌ Error en verificación de webhooks programados:', error);
   }
 };
