@@ -2,6 +2,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,9 +11,17 @@ let db;
 
 export const initDatabase = async () => {
   try {
+    // Ensure the database directory exists
+    const dbPath = path.join(__dirname, '../../webhooks.db');
+    const dbDir = path.dirname(dbPath);
+    
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
     // Configuración de conexión a SQLite
     db = await open({
-      filename: path.join(__dirname, '../../webhooks.db'),
+      filename: dbPath,
       driver: sqlite3.Database
     });
 
@@ -90,30 +99,50 @@ export const dbQuery = async (text, params = []) => {
   if (!db) {
     throw new Error('Base de datos no inicializada');
   }
-  return await db.all(text, params);
+  try {
+    return await db.all(text, params);
+  } catch (error) {
+    console.error('Error en dbQuery:', error);
+    throw error;
+  }
 };
 
 export const dbRun = async (text, params = []) => {
   if (!db) {
     throw new Error('Base de datos no inicializada');
   }
-  const result = await db.run(text, params);
-  return {
-    rowCount: result.changes || 0,
-    rows: []
-  };
+  try {
+    const result = await db.run(text, params);
+    return {
+      rowCount: result.changes || 0,
+      rows: []
+    };
+  } catch (error) {
+    console.error('Error en dbRun:', error);
+    throw error;
+  }
 };
 
 export const dbGet = async (text, params = []) => {
   if (!db) {
     throw new Error('Base de datos no inicializada');
   }
-  return await db.get(text, params);
+  try {
+    return await db.get(text, params);
+  } catch (error) {
+    console.error('Error en dbGet:', error);
+    throw error;
+  }
 };
 
 export const dbAll = async (text, params = []) => {
   if (!db) {
     throw new Error('Base de datos no inicializada');
   }
-  return await db.all(text, params);
+  try {
+    return await db.all(text, params);
+  } catch (error) {
+    console.error('Error en dbAll:', error);
+    throw error;
+  }
 };

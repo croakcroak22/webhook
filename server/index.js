@@ -35,67 +35,84 @@ app.use(express.urlencoded({ extended: true }));
 // Logging
 app.use(morgan('combined'));
 
-// Inicializar base de datos
-await initDatabase();
+// Función para inicializar el servidor
+const startServer = async () => {
+  try {
+    // Inicializar base de datos
+    console.log('🔄 Inicializando base de datos...');
+    await initDatabase();
+    console.log('✅ Base de datos inicializada correctamente');
 
-// Rutas de la API
-app.use('/api/webhooks', webhookRoutes);
+    // Rutas de la API
+    app.use('/api/webhooks', webhookRoutes);
 
-// Endpoint de salud
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
+    // Endpoint de salud
+    app.get('/api/health', (req, res) => {
+      res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+      });
+    });
 
-// Servir archivos estáticos en producción
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(join(__dirname, '../dist')));
-  
-  app.get('*', (req, res) => {
-    res.sendFile(join(__dirname, '../dist/index.html'));
-  });
-}
+    // Servir archivos estáticos en producción
+    if (process.env.NODE_ENV === 'production') {
+      app.use(express.static(join(__dirname, '../dist')));
+      
+      app.get('*', (req, res) => {
+        res.sendFile(join(__dirname, '../dist/index.html'));
+      });
+    }
 
-// Manejo de errores global
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(500).json({
-    success: false,
-    message: 'Error interno del servidor',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
+    // Manejo de errores global
+    app.use((err, req, res, next) => {
+      console.error('Error:', err);
+      res.status(500).json({
+        success: false,
+        message: 'Error interno del servidor',
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
+    });
 
-// Manejo de rutas no encontradas
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Endpoint no encontrado'
-  });
-});
+    // Manejo de rutas no encontradas
+    app.use('*', (req, res) => {
+      res.status(404).json({
+        success: false,
+        message: 'Endpoint no encontrado'
+      });
+    });
 
-// Programar verificación de webhooks cada minuto
-cron.schedule('* * * * *', () => {
-  checkScheduledWebhooks();
-});
+    // Programar verificación de webhooks cada minuto
+    console.log('⏰ Configurando scheduler...');
+    cron.schedule('* * * * *', () => {
+      checkScheduledWebhooks();
+    });
 
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor ejecutándose en puerto ${PORT}`);
-  console.log(`📡 API disponible en http://localhost:${PORT}/api`);
-  console.log(`⏰ Scheduler activo - verificando webhooks cada minuto`);
-});
+    // Iniciar servidor
+    const server = app.listen(PORT, () => {
+      console.log(`🚀 Servidor ejecutándose en puerto ${PORT}`);
+      console.log(`📡 API disponible en http://localhost:${PORT}/api`);
+      console.log(`⏰ Scheduler activo - verificando webhooks cada minuto`);
+    });
 
-// Manejo graceful de cierre
-process.on('SIGTERM', () => {
-  console.log('🛑 Cerrando servidor...');
-  process.exit(0);
-});
+    // Manejo graceful de cierre
+    const gracefulShutdown = () => {
+      console.log('🛑 Cerrando servidor...');
+      server.close(() => {
+        console.log('✅ Servidor cerrado correctamente');
+        process.exit(0);
+      });
+    };
 
-process.on('SIGINT', () => {
-  console.log('🛑 Cerrando servidor...');
-  process.exit(0);
-});
+    process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
+
+  } catch (error) {
+    console.error('❌ Error iniciando el servidor:', error);
+    console.error('Stack trace:', error.stack);
+    process.exit(1);
+  }
+};
+
+// Iniciar el servidor
+startServer();
