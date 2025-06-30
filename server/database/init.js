@@ -1,32 +1,25 @@
-import pkg from 'pg';
-const { Pool } = pkg;
-import dotenv from 'dotenv';
+import sqlite3 from 'sqlite3';
+import { open } from 'sqlite';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-let pool;
+let db;
 
 export const initDatabase = async () => {
   try {
-    // Configuración de conexión a PostgreSQL
-    pool = new Pool({
-      host: process.env.DB_HOST || '5us72d.easypanel.host',
-      port: parseInt(process.env.DB_PORT || '5432'),
-      database: process.env.DB_NAME || 'n8n',
-      user: process.env.DB_USER || 'postgres',
-      password: process.env.DB_PASSWORD || 'hEMb1q6H77Pi',
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+    // Configuración de conexión a SQLite
+    db = await open({
+      filename: path.join(__dirname, '../../webhooks.db'),
+      driver: sqlite3.Database
     });
 
-    // Probar conexión
-    const client = await pool.connect();
-    console.log('📊 Conectado a PostgreSQL');
+    console.log('📊 Conectado a SQLite');
     
     // Crear tablas si no existen
-    await client.query(`
+    await db.exec(`
       CREATE TABLE IF NOT EXISTS webhooks (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -34,24 +27,24 @@ export const initDatabase = async () => {
         scheduled_time TEXT NOT NULL,
         webhook_url TEXT NOT NULL,
         message TEXT NOT NULL,
-        leads JSONB NOT NULL,
-        tags JSONB DEFAULT '[]'::jsonb,
+        leads TEXT NOT NULL,
+        tags TEXT DEFAULT '[]',
         status TEXT DEFAULT 'pending',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        executed_at TIMESTAMP,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        executed_at TEXT,
         error_message TEXT,
         retry_count INTEGER DEFAULT 0,
         max_retries INTEGER DEFAULT 3,
-        deleted_at TIMESTAMP,
+        deleted_at TEXT,
         is_deleted BOOLEAN DEFAULT FALSE
       )
     `);
 
-    await client.query(`
+    await db.exec(`
       CREATE TABLE IF NOT EXISTS webhook_logs (
         id TEXT PRIMARY KEY,
         webhook_id TEXT NOT NULL,
-        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
         status TEXT NOT NULL,
         message TEXT NOT NULL,
         response TEXT,
@@ -61,63 +54,66 @@ export const initDatabase = async () => {
     `);
 
     // Crear índices para mejor rendimiento
-    await client.query(`
+    await db.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhooks_status ON webhooks(status) WHERE is_deleted = FALSE
     `);
     
-    await client.query(`
+    await db.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhooks_scheduled ON webhooks(scheduled_date, scheduled_time) WHERE is_deleted = FALSE
     `);
 
-    await client.query(`
+    await db.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhooks_deleted ON webhooks(is_deleted, deleted_at)
     `);
 
-    await client.query(`
+    await db.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_id ON webhook_logs(webhook_id)
     `);
 
-    client.release();
-    console.log('✅ Tablas de PostgreSQL inicializadas');
+    console.log('✅ Tablas de SQLite inicializadas');
     
   } catch (error) {
-    console.error('❌ Error conectando a PostgreSQL:', error);
+    console.error('❌ Error conectando a SQLite:', error);
     throw error;
   }
 };
 
 export const getDatabase = () => {
-  if (!pool) {
+  if (!db) {
     throw new Error('Base de datos no inicializada');
   }
-  return pool;
+  return db;
 };
 
 // Funciones helper para queries
 export const dbQuery = async (text, params = []) => {
-  const client = await pool.connect();
-  try {
-    const result = await client.query(text, params);
-    return result;
-  } finally {
-    client.release();
+  if (!db) {
+    throw new Error('Base de datos no inicializada');
   }
+  return await db.all(text, params);
 };
 
 export const dbRun = async (text, params = []) => {
-  const result = await dbQuery(text, params);
+  if (!db) {
+    throw new Error('Base de datos no inicializada');
+  }
+  const result = await db.run(text, params);
   return {
-    rowCount: result.rowCount,
-    rows: result.rows
+    rowCount: result.changes || 0,
+    rows: []
   };
 };
 
 export const dbGet = async (text, params = []) => {
-  const result = await dbQuery(text, params);
-  return result.rows[0] || null;
+  if (!db) {
+    throw new Error('Base de datos no inicializada');
+  }
+  return await db.get(text, params);
 };
 
 export const dbAll = async (text, params = []) => {
-  const result = await dbQuery(text, params);
-  return result.rows;
+  if (!db) {
+    throw new Error('Base de datos no inicializada');
+  }
+  return await db.all(text, params);
 };
