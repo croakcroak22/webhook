@@ -84,8 +84,8 @@ router.get('/', async (req, res) => {
     // Parsear JSON fields
     const parsedWebhooks = webhooks.map(webhook => ({
       ...webhook,
-      leads: webhook.leads,
-      tags: webhook.tags || []
+      leads: typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [],
+      tags: typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || []
     }));
 
     res.json({
@@ -113,8 +113,8 @@ router.get('/trash', async (req, res) => {
     // Parsear JSON fields
     const parsedWebhooks = webhooks.map(webhook => ({
       ...webhook,
-      leads: webhook.leads,
-      tags: webhook.tags || []
+      leads: typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [],
+      tags: typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || []
     }));
 
     res.json({
@@ -145,8 +145,8 @@ router.get('/:id', async (req, res) => {
     }
 
     // Parsear JSON fields
-    webhook.leads = webhook.leads;
-    webhook.tags = webhook.tags || [];
+    webhook.leads = typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [];
+    webhook.tags = typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || [];
 
     res.json({
       success: true,
@@ -176,8 +176,8 @@ router.post('/:id/execute', async (req, res) => {
     }
 
     // Parsear JSON fields
-    webhook.leads = webhook.leads;
-    webhook.tags = webhook.tags || [];
+    webhook.leads = typeof webhook.leads === 'string' ? JSON.parse(webhook.leads) : webhook.leads || [];
+    webhook.tags = typeof webhook.tags === 'string' ? JSON.parse(webhook.tags) : webhook.tags || [];
 
     const result = await executeWebhook(webhook, true);
 
