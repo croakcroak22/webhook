@@ -227,26 +227,38 @@ export const useWebhooks = () => {
   // Restaurar webhook desde papelera
   const restoreWebhook = useCallback(async (id: string) => {
     try {
+      console.log('Restaurando webhook:', id);
+      
       const response = await fetch(`${API_BASE}/${id}/restore`, {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
 
+      console.log('Response status:', response.status);
+      
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
       }
 
       const data = await response.json();
+      console.log('Restore response:', data);
       
       if (data.success) {
-        await loadWebhooks();
-        await loadTrashedWebhooks();
-        await loadLogs();
+        console.log('Webhook restaurado exitosamente, recargando datos...');
+        await Promise.all([loadWebhooks(), loadTrashedWebhooks(), loadLogs()]);
+        console.log('Datos recargados');
+        return true;
+      } else {
+        console.error('Error en respuesta:', data.message);
+        throw new Error(data.message || 'Error desconocido');
       }
-      
-      return data.success;
     } catch (error) {
       console.error('Error restaurando webhook:', error);
-      return false;
+      throw error;
     }
   }, [loadWebhooks, loadTrashedWebhooks, loadLogs]);
 

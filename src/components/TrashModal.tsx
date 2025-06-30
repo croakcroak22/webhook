@@ -42,7 +42,12 @@ const TrashModal: React.FC<TrashModalProps> = ({ onClose }) => {
   const handleRestore = async (id: string) => {
     setRestoringIds(prev => new Set([...prev, id]));
     try {
+      console.log('Iniciando restauración de webhook:', id);
       await restoreWebhook(id);
+      console.log('Webhook restaurado exitosamente');
+    } catch (error) {
+      console.error('Error restaurando webhook:', error);
+      alert(`Error restaurando webhook: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     } finally {
       setRestoringIds(prev => {
         const newSet = new Set(prev);
