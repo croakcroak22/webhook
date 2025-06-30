@@ -1,109 +1,106 @@
 import axios from 'axios';
-import { dbRun, dbGet } from '../database/init.js';
+import { v4 as uuidv4 } from 'uuid';
+import { dbRun } from '../database/init.js';
 
-export const executeWebhook = async (webhook, isManual = false) => {
-  const startTime = Date.now();
-  let success = false;
-  let message = '';
-  let responseData = null;
-  let errorMessage = null;
-
+export const executeWebhook = async (webhook) => {
+  const logId = uuidv4();
+  const executedAt = new Date().toISOString();
+  
   try {
-    console.log(`🚀 Ejecutando webhook ${webhook.id}: ${webhook.name}`);
+    console.log(`🚀 Ejecutando webhook: ${webhook.name} (${webhook.url})`);
     
-    // Preparar payload
-    const payload = {
-      name: webhook.name,
-      scheduledDate: webhook.scheduled_date,
-      scheduledTime: webhook.scheduled_time,
-      message: webhook.message,
-      leads: webhook.leads ? JSON.parse(webhook.leads) : [],
-      tags: webhook.tags ? JSON.parse(webhook.tags) : [],
-      executedAt: new Date().toISOString(),
-      isManual
-    };
+    // Preparar headers
+    let headers = {};
+    try {
+      headers = typeof webhook.headers === 'string' 
+        ? JSON.parse(webhook.headers) 
+        : webhook.headers || {};
+    } catch (error) {
+      console.warn(`⚠️ Headers inválidos para webhook ${webhook.name}, usando headers vacíos`);
+      headers = {};
+    }
 
-    console.log('📤 Enviando payload:', payload);
+    // Preparar body
+    let data = null;
+    if (webhook.method !== 'GET' && webhook.body) {
+      try {
+        data = typeof webhook.body === 'string' 
+          ? JSON.parse(webhook.body) 
+          : webhook.body;
+      } catch (error) {
+        console.warn(`⚠️ Body inválido para webhook ${webhook.name}, usando body vacío`);
+        data = {};
+      }
+    }
 
-    // Realizar petición HTTP
-    const response = await axios.post(webhook.webhook_url, payload, {
-      timeout: 30000, // 30 segundos
+    // Configurar request
+    const config = {
+      method: webhook.method || 'POST',
+      url: webhook.url,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'N8N-Webhook-Scheduler/1.0'
-      }
-    });
+        'User-Agent': 'N8N-Webhook-Scheduler/1.0',
+        ...headers
+      },
+      timeout: 30000, // 30 segundos
+      validateStatus: () => true // No lanzar error por códigos de estado HTTP
+    };
 
-    success = true;
-    message = `Webhook ejecutado exitosamente (${response.status})`;
-    responseData = JSON.stringify(response.data);
+    if (data && webhook.method !== 'GET') {
+      config.data = data;
+    }
+
+    // Ejecutar request
+    const response = await axios(config);
     
-    console.log(`✅ Webhook ${webhook.id} ejecutado exitosamente`);
-
-    // Actualizar estado del webhook
+    // Log exitoso
     await dbRun(`
-      UPDATE webhooks 
-      SET status = 'sent', executed_at = CURRENT_TIMESTAMP, error_message = NULL
-      WHERE id = ?
-    `, [webhook.id]);
+      INSERT INTO webhook_logs (
+        id, webhook_id, status, response_code, response_body, executed_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `, [
+      logId,
+      webhook.id,
+      'success',
+      response.status,
+      JSON.stringify({
+        data: response.data,
+        headers: response.headers
+      }),
+      executedAt
+    ]);
+
+    console.log(`✅ Webhook ejecutado exitosamente: ${webhook.name} - Status: ${response.status}`);
+    
+    return {
+      success: true,
+      status: response.status,
+      data: response.data,
+      executedAt
+    };
 
   } catch (error) {
-    success = false;
-    errorMessage = error.message;
+    console.error(`❌ Error ejecutando webhook ${webhook.name}:`, error.message);
     
-    if (error.response) {
-      message = `Error HTTP ${error.response.status}: ${error.response.statusText}`;
-      responseData = JSON.stringify(error.response.data);
-    } else if (error.request) {
-      message = 'Error de conexión: No se pudo conectar al webhook';
-    } else {
-      message = `Error: ${error.message}`;
-    }
+    // Log de error
+    await dbRun(`
+      INSERT INTO webhook_logs (
+        id, webhook_id, status, response_code, error_message, executed_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `, [
+      logId,
+      webhook.id,
+      'error',
+      error.response?.status || null,
+      error.message,
+      executedAt
+    ]);
 
-    console.error(`❌ Error ejecutando webhook ${webhook.id}:`, error.message);
-
-    // Incrementar contador de reintentos
-    const newRetryCount = (webhook.retry_count || 0) + 1;
-    const maxRetries = webhook.max_retries || 3;
-    
-    if (newRetryCount >= maxRetries) {
-      // Marcar como fallido si se alcanzó el máximo de reintentos
-      await dbRun(`
-        UPDATE webhooks 
-        SET status = 'failed', retry_count = ?, error_message = ?
-        WHERE id = ?
-      `, [newRetryCount, errorMessage, webhook.id]);
-    } else {
-      // Incrementar contador de reintentos
-      await dbRun(`
-        UPDATE webhooks 
-        SET retry_count = ?, error_message = ?
-        WHERE id = ?
-      `, [newRetryCount, errorMessage, webhook.id]);
-    }
+    return {
+      success: false,
+      error: error.message,
+      status: error.response?.status || null,
+      executedAt
+    };
   }
-
-  const executionTime = Date.now() - startTime;
-
-  // Crear log de ejecución
-  await dbRun(`
-    INSERT INTO webhook_logs (
-      webhook_id, status, message, response_data, error_message, execution_time, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-  `, [
-    webhook.id,
-    success ? 'sent' : 'failed',
-    message,
-    responseData,
-    errorMessage,
-    executionTime
-  ]);
-
-  return {
-    success,
-    message,
-    executionTime,
-    responseData,
-    errorMessage
-  };
 };

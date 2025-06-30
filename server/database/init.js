@@ -10,53 +10,48 @@ let db = null;
 
 export const initDatabase = async () => {
   try {
-    const dbPath = process.env.DATABASE_PATH || join(__dirname, '../webhooks.db');
-    console.log('📁 Ruta de la base de datos:', dbPath);
+    console.log('🔄 Conectando a la base de datos...');
     
+    // Crear la conexión a la base de datos
     db = await open({
-      filename: dbPath,
+      filename: join(__dirname, '../../webhooks.db'),
       driver: sqlite3.Database
     });
 
-    console.log('🔗 Conexión a SQLite establecida');
+    console.log('✅ Conexión a base de datos establecida');
 
-    // Crear tabla de webhooks
+    // Crear tabla de webhooks si no existe
     await db.exec(`
       CREATE TABLE IF NOT EXISTS webhooks (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        scheduled_date TEXT NOT NULL,
-        scheduled_time TEXT NOT NULL,
-        webhook_url TEXT NOT NULL,
-        message TEXT,
-        leads TEXT,
-        tags TEXT,
-        status TEXT DEFAULT 'pending',
+        url TEXT NOT NULL,
+        method TEXT DEFAULT 'POST',
+        headers TEXT DEFAULT '{}',
+        body TEXT DEFAULT '{}',
+        schedule_type TEXT NOT NULL,
+        schedule_value TEXT NOT NULL,
+        is_active BOOLEAN DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        executed_at DATETIME,
-        deleted_at DATETIME,
-        error_message TEXT,
-        retry_count INTEGER DEFAULT 0,
-        max_retries INTEGER DEFAULT 3
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
-    // Crear tabla de logs
+    // Crear tabla de logs si no existe
     await db.exec(`
       CREATE TABLE IF NOT EXISTS webhook_logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        webhook_id TEXT,
+        id TEXT PRIMARY KEY,
+        webhook_id TEXT NOT NULL,
         status TEXT NOT NULL,
-        message TEXT,
-        response_data TEXT,
+        response_code INTEGER,
+        response_body TEXT,
         error_message TEXT,
-        execution_time INTEGER,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (webhook_id) REFERENCES webhooks (id)
+        executed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (webhook_id) REFERENCES webhooks (id) ON DELETE CASCADE
       )
     `);
 
-    console.log('✅ Tablas de base de datos creadas/verificadas');
+    console.log('✅ Tablas de base de datos verificadas/creadas');
     return db;
   } catch (error) {
     console.error('❌ Error inicializando base de datos:', error);
