@@ -123,9 +123,14 @@ const startServer = async () => {
 
     // Programar verificación de webhooks cada minuto
     console.log('⏰ Configurando scheduler...');
-    cron.schedule('* * * * *', () => {
-      console.log('⏰ Ejecutando verificación de webhooks programados...');
-      checkScheduledWebhooks();
+    cron.schedule('* * * * *', async () => {
+      try {
+        console.log('⏰ Ejecutando verificación de webhooks programados...');
+        await checkScheduledWebhooks();
+      } catch (error) {
+        console.error('❌ Error en verificación de webhooks programados:', error);
+        console.error('Stack:', error.stack);
+      }
     });
 
     // Iniciar servidor
