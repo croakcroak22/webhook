@@ -10,6 +10,7 @@ export interface WebhookData {
   status: 'pending' | 'sent' | 'failed' | 'cancelled';
   createdAt: string;
   executedAt?: string;
+  deletedAt?: string;
   error?: string;
   retryCount: number;
   maxRetries: number;
@@ -28,10 +29,11 @@ export interface WebhookLog {
   id: string;
   webhookId: string;
   timestamp: string;
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'info';
   message: string;
   response?: any;
   duration: number;
+  webhook_name?: string;
 }
 
 export interface N8NWebhookPayload {

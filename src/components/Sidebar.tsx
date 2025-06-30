@@ -7,8 +7,10 @@ import {
   Zap,
   Activity,
   Moon,
-  Sun
+  Sun,
+  Trash
 } from 'lucide-react';
+import { useWebhooks } from '../hooks/useWebhooks';
 
 interface SidebarProps {
   activeTab: string;
@@ -18,9 +20,17 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, darkMode, onToggleDarkMode }) => {
+  const { getStats } = useWebhooks();
+  const stats = getStats();
+
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'webhooks', label: 'Webhooks', icon: Send },
+    { 
+      id: 'webhooks', 
+      label: 'Webhooks', 
+      icon: Send,
+      badge: stats.total > 0 ? stats.total : undefined
+    },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -47,17 +57,51 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange, darkMode, onT
           <button
             key={item.id}
             onClick={() => onTabChange(item.id)}
-            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition-colors ${
               activeTab === item.id
                 ? 'bg-primary-50 dark:bg-primary-900 text-primary-600 dark:text-primary-400'
                 : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'
             }`}
           >
-            <item.icon className="w-5 h-5" />
-            <span className="font-medium">{item.label}</span>
+            <div className="flex items-center space-x-3">
+              <item.icon className="w-5 h-5" />
+              <span className="font-medium">{item.label}</span>
+            </div>
+            {item.badge && (
+              <span className="bg-primary-500 text-white text-xs px-2 py-1 rounded-full">
+                {item.badge}
+              </span>
+            )}
           </button>
         ))}
       </nav>
+
+      {/* Stats Summary */}
+      {stats.total > 0 && (
+        <div className="mb-8 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+          <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-3">Quick Stats</h3>
+          <div className="space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600 dark:text-gray-400">Pending</span>
+              <span className="font-medium text-yellow-600">{stats.pending}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600 dark:text-gray-400">Sent</span>
+              <span className="font-medium text-success-600">{stats.sent}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600 dark:text-gray-400">Failed</span>
+              <span className="font-medium text-error-600">{stats.failed}</span>
+            </div>
+            {stats.deleted > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600 dark:text-gray-400">In Trash</span>
+                <span className="font-medium text-gray-600">{stats.deleted}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Status Indicator */}
       <div className="mb-8">

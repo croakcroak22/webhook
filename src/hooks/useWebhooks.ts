@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { WebhookData, WebhookLog, N8NWebhookPayload } from '../types/webhook';
-import { format, isAfter, parseISO } from 'date-fns';
 
 const API_BASE = '/api/webhooks';
 
 export const useWebhooks = () => {
   const [webhooks, setWebhooks] = useState<WebhookData[]>([]);
+  const [trashedWebhooks, setTrashedWebhooks] = useState<WebhookData[]>([]);
   const [logs, setLogs] = useState<WebhookLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -41,8 +41,44 @@ export const useWebhooks = () => {
       }
     } catch (error) {
       console.error('Error cargando webhooks:', error);
-      // Set empty array on error to prevent UI issues
       setWebhooks([]);
+    }
+  }, []);
+
+  // Cargar webhooks eliminados (papelera)
+  const loadTrashedWebhooks = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/trash`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        const transformedWebhooks = data.webhooks.map((webhook: any) => ({
+          id: webhook.id,
+          name: webhook.name,
+          scheduledDate: webhook.scheduled_date,
+          scheduledTime: webhook.scheduled_time,
+          webhookUrl: webhook.webhook_url,
+          message: webhook.message,
+          leads: webhook.leads,
+          tags: webhook.tags,
+          status: webhook.status,
+          createdAt: webhook.created_at,
+          executedAt: webhook.executed_at,
+          deletedAt: webhook.deleted_at,
+          error: webhook.error_message,
+          retryCount: webhook.retry_count || 0,
+          maxRetries: webhook.max_retries || 3,
+        }));
+        setTrashedWebhooks(transformedWebhooks);
+      }
+    } catch (error) {
+      console.error('Error cargando webhooks eliminados:', error);
+      setTrashedWebhooks([]);
     }
   }, []);
 
@@ -62,7 +98,6 @@ export const useWebhooks = () => {
       }
     } catch (error) {
       console.error('Error cargando logs:', error);
-      // Set empty array on error to prevent UI issues
       setLogs([]);
     }
   }, []);
@@ -71,14 +106,14 @@ export const useWebhooks = () => {
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
-      await Promise.all([loadWebhooks(), loadLogs()]);
+      await Promise.all([loadWebhooks(), loadTrashedWebhooks(), loadLogs()]);
       setIsLoading(false);
     };
     
     loadData();
-  }, [loadWebhooks, loadLogs]);
+  }, [loadWebhooks, loadTrashedWebhooks, loadLogs]);
 
-  // Crear webhook (ahora solo para uso local, n8n usa el endpoint directo)
+  // Crear webhook
   const createWebhook = useCallback(async (payload: N8NWebhookPayload) => {
     try {
       const response = await fetch(`${API_BASE}/receive`, {
@@ -96,8 +131,8 @@ export const useWebhooks = () => {
       const data = await response.json();
       
       if (data.success) {
-        await loadWebhooks(); // Recargar webhooks
-        await loadLogs(); // Recargar logs
+        await loadWebhooks();
+        await loadLogs();
         return data;
       } else {
         throw new Error(data.message);
@@ -125,8 +160,8 @@ export const useWebhooks = () => {
       const data = await response.json();
       
       if (data.success) {
-        await loadWebhooks(); // Recargar webhooks
-        await loadLogs(); // Recargar logs
+        await loadWebhooks();
+        await loadLogs();
       }
       
       return data.success;
@@ -136,7 +171,7 @@ export const useWebhooks = () => {
     }
   }, [loadWebhooks, loadLogs]);
 
-  // Eliminar webhook
+  // Eliminar webhook (mover a papelera)
   const deleteWebhook = useCallback(async (id: string) => {
     try {
       const response = await fetch(`${API_BASE}/${id}`, {
@@ -150,8 +185,9 @@ export const useWebhooks = () => {
       const data = await response.json();
       
       if (data.success) {
-        await loadWebhooks(); // Recargar webhooks
-        await loadLogs(); // Recargar logs
+        await loadWebhooks();
+        await loadTrashedWebhooks();
+        await loadLogs();
       }
       
       return data.success;
@@ -159,12 +195,120 @@ export const useWebhooks = () => {
       console.error('Error eliminando webhook:', error);
       return false;
     }
-  }, []);
+  }, [loadWebhooks, loadTrashedWebhooks, loadLogs]);
+
+  // Eliminar todos los webhooks
+  const deleteAllWebhooks = useCallback(async (confirmation: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/bulk/all`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ confirmation }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        await loadWebhooks();
+        await loadTrashedWebhooks();
+        await loadLogs();
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error eliminando todos los webhooks:', error);
+      throw error;
+    }
+  }, [loadWebhooks, loadTrashedWebhooks, loadLogs]);
+
+  // Restaurar webhook desde papelera
+  const restoreWebhook = useCallback(async (id: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/${id}/restore`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        await loadWebhooks();
+        await loadTrashedWebhooks();
+        await loadLogs();
+      }
+      
+      return data.success;
+    } catch (error) {
+      console.error('Error restaurando webhook:', error);
+      return false;
+    }
+  }, [loadWebhooks, loadTrashedWebhooks, loadLogs]);
+
+  // Eliminar permanentemente webhook
+  const deletePermanently = useCallback(async (id: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/${id}/permanent`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        await loadTrashedWebhooks();
+        await loadLogs();
+      }
+      
+      return data.success;
+    } catch (error) {
+      console.error('Error eliminando permanentemente webhook:', error);
+      return false;
+    }
+  }, [loadTrashedWebhooks, loadLogs]);
+
+  // Vaciar papelera
+  const emptyTrash = useCallback(async (confirmation: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/trash/empty`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ confirmation }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.success) {
+        await loadTrashedWebhooks();
+        await loadLogs();
+      }
+      
+      return data;
+    } catch (error) {
+      console.error('Error vaciando papelera:', error);
+      throw error;
+    }
+  }, [loadTrashedWebhooks, loadLogs]);
 
   // Actualizar webhook (placeholder para compatibilidad)
   const updateWebhook = useCallback((id: string, updates: Partial<WebhookData>) => {
-    // Esta función se mantiene para compatibilidad con el código existente
-    // En el backend real, implementarías un endpoint PUT
     console.log('updateWebhook llamado:', id, updates);
   }, []);
 
@@ -175,27 +319,33 @@ export const useWebhooks = () => {
     const sent = webhooks.filter(w => w.status === 'sent').length;
     const failed = webhooks.filter(w => w.status === 'failed').length;
     const cancelled = webhooks.filter(w => w.status === 'cancelled').length;
+    const deleted = trashedWebhooks.length;
 
-    return { total, pending, sent, failed, cancelled };
-  }, [webhooks]);
+    return { total, pending, sent, failed, cancelled, deleted };
+  }, [webhooks, trashedWebhooks]);
 
   // Verificar webhooks programados (ahora manejado por el backend)
   const checkScheduledWebhooks = useCallback(() => {
     // Esta función ahora es manejada por el scheduler del backend
-    // Se mantiene para compatibilidad
   }, []);
 
   return {
     webhooks,
+    trashedWebhooks,
     logs,
     isLoading,
     createWebhook,
     updateWebhook,
     deleteWebhook,
+    deleteAllWebhooks,
+    restoreWebhook,
+    deletePermanently,
+    emptyTrash,
     executeWebhook,
     getStats,
     checkScheduledWebhooks,
     loadWebhooks,
+    loadTrashedWebhooks,
     loadLogs,
   };
 };

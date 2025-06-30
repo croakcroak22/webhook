@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, 
   Filter, 
@@ -14,19 +14,25 @@ import {
   Play,
   Edit,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  Trash,
+  AlertTriangle
 } from 'lucide-react';
 import { WebhookData } from '../types/webhook';
 import { useWebhooks } from '../hooks/useWebhooks';
 import WebhookForm from './WebhookForm';
+import BulkDeleteModal from './BulkDeleteModal';
+import TrashModal from './TrashModal';
 
 const WebhookList: React.FC = () => {
-  const { webhooks, deleteWebhook, executeWebhook, createWebhook } = useWebhooks();
+  const { webhooks, deleteWebhook, executeWebhook, createWebhook, deleteAllWebhooks } = useWebhooks();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showForm, setShowForm] = useState(false);
   const [selectedWebhook, setSelectedWebhook] = useState<WebhookData | null>(null);
   const [executingWebhooks, setExecutingWebhooks] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showTrashModal, setShowTrashModal] = useState(false);
 
   const filteredWebhooks = webhooks.filter(webhook => {
     const matchesSearch = webhook.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -48,6 +54,15 @@ const WebhookList: React.FC = () => {
         newSet.delete(webhook.id);
         return newSet;
       });
+    }
+  };
+
+  const handleBulkDelete = async (confirmation: string) => {
+    try {
+      await deleteAllWebhooks(confirmation);
+      setShowBulkDeleteModal(false);
+    } catch (error) {
+      console.error('Error en eliminación masiva:', error);
     }
   };
 
@@ -211,16 +226,34 @@ const WebhookList: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Webhooks</h1>
-        <button
-          onClick={() => {
-            setSelectedWebhook(null);
-            setShowForm(true);
-          }}
-          className="flex items-center px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          New Webhook
-        </button>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setShowTrashModal(true)}
+            className="flex items-center px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors"
+          >
+            <Trash className="w-4 h-4 mr-2" />
+            Trash
+          </button>
+          {webhooks.length > 0 && (
+            <button
+              onClick={() => setShowBulkDeleteModal(true)}
+              className="flex items-center px-4 py-2 bg-error-500 text-white rounded-lg hover:bg-error-600 transition-colors"
+            >
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Delete All
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setSelectedWebhook(null);
+              setShowForm(true);
+            }}
+            className="flex items-center px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            New Webhook
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -283,21 +316,37 @@ const WebhookList: React.FC = () => {
         )}
       </div>
 
-      {/* Form Modal */}
-      {showForm && (
-        <WebhookForm
-          initialData={selectedWebhook || undefined}
-          onSubmit={(payload) => {
-            createWebhook(payload);
-            setShowForm(false);
-            setSelectedWebhook(null);
-          }}
-          onCancel={() => {
-            setShowForm(false);
-            setSelectedWebhook(null);
-          }}
-        />
-      )}
+      {/* Modals */}
+      <AnimatePresence>
+        {showForm && (
+          <WebhookForm
+            initialData={selectedWebhook || undefined}
+            onSubmit={(payload) => {
+              createWebhook(payload);
+              setShowForm(false);
+              setSelectedWebhook(null);
+            }}
+            onCancel={() => {
+              setShowForm(false);
+              setSelectedWebhook(null);
+            }}
+          />
+        )}
+
+        {showBulkDeleteModal && (
+          <BulkDeleteModal
+            onConfirm={handleBulkDelete}
+            onCancel={() => setShowBulkDeleteModal(false)}
+            webhookCount={webhooks.length}
+          />
+        )}
+
+        {showTrashModal && (
+          <TrashModal
+            onClose={() => setShowTrashModal(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
