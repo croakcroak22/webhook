@@ -7,7 +7,7 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let db;
+let dbInstance;
 
 export const initDatabase = async () => {
   try {
@@ -22,7 +22,7 @@ export const initDatabase = async () => {
     console.log('📊 Conectando a SQLite en:', dbPath);
 
     // Configuración de conexión a SQLite
-    db = await open({
+    dbInstance = await open({
       filename: dbPath,
       driver: sqlite3.Database
     });
@@ -30,7 +30,7 @@ export const initDatabase = async () => {
     console.log('📊 Conectado a SQLite exitosamente');
     
     // Verificar si las tablas existen
-    const tables = await db.all(`
+    const tables = await dbInstance.all(`
       SELECT name FROM sqlite_master 
       WHERE type='table' AND name NOT LIKE 'sqlite_%'
     `);
@@ -39,7 +39,7 @@ export const initDatabase = async () => {
     
     // Crear tablas si no existen
     console.log('🔧 Creando tabla webhooks...');
-    await db.exec(`
+    await dbInstance.exec(`
       CREATE TABLE IF NOT EXISTS webhooks (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -61,7 +61,7 @@ export const initDatabase = async () => {
     `);
 
     console.log('🔧 Creando tabla webhook_logs...');
-    await db.exec(`
+    await dbInstance.exec(`
       CREATE TABLE IF NOT EXISTS webhook_logs (
         id TEXT PRIMARY KEY,
         webhook_id TEXT NOT NULL,
@@ -76,24 +76,24 @@ export const initDatabase = async () => {
 
     // Crear índices para mejor rendimiento
     console.log('🔧 Creando índices...');
-    await db.exec(`
+    await dbInstance.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhooks_status ON webhooks(status) WHERE is_deleted = FALSE
     `);
     
-    await db.exec(`
+    await dbInstance.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhooks_scheduled ON webhooks(scheduled_date, scheduled_time) WHERE is_deleted = FALSE
     `);
 
-    await db.exec(`
+    await dbInstance.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhooks_deleted ON webhooks(is_deleted, deleted_at)
     `);
 
-    await db.exec(`
+    await dbInstance.exec(`
       CREATE INDEX IF NOT EXISTS idx_webhook_logs_webhook_id ON webhook_logs(webhook_id)
     `);
 
     // Verificar tablas después de la creación
-    const tablesAfter = await db.all(`
+    const tablesAfter = await dbInstance.all(`
       SELECT name FROM sqlite_master 
       WHERE type='table' AND name NOT LIKE 'sqlite_%'
     `);
@@ -101,16 +101,16 @@ export const initDatabase = async () => {
     console.log('✅ Tablas creadas:', tablesAfter.map(t => t.name));
     
     // Verificar estructura de la tabla webhooks
-    const webhooksSchema = await db.all(`PRAGMA table_info(webhooks)`);
+    const webhooksSchema = await dbInstance.all(`PRAGMA table_info(webhooks)`);
     console.log('📋 Estructura tabla webhooks:', webhooksSchema);
     
     // Verificar estructura de la tabla webhook_logs
-    const logsSchema = await db.all(`PRAGMA table_info(webhook_logs)`);
+    const logsSchema = await dbInstance.all(`PRAGMA table_info(webhook_logs)`);
     console.log('📋 Estructura tabla webhook_logs:', logsSchema);
     
     // Contar registros existentes
-    const webhookCount = await db.get(`SELECT COUNT(*) as count FROM webhooks`);
-    const logCount = await db.get(`SELECT COUNT(*) as count FROM webhook_logs`);
+    const webhookCount = await dbInstance.get(`SELECT COUNT(*) as count FROM webhooks`);
+    const logCount = await dbInstance.get(`SELECT COUNT(*) as count FROM webhook_logs`);
     
     console.log('📊 Registros existentes:');
     console.log('  - Webhooks:', webhookCount.count);
@@ -126,17 +126,15 @@ export const initDatabase = async () => {
 };
 
 export const getDatabase = () => {
-  if (!db) {
+  if (!dbInstance) {
     throw new Error('Base de datos no inicializada');
   }
-  return db;
+  return dbInstance;
 };
 
 // Funciones helper para queries
 export const dbQuery = async (text, params = []) => {
-  if (!db) {
-    throw new Error('Base de datos no inicializada');
-  }
+  const db = getDatabase();
   try {
     console.log('🔍 Ejecutando query:', text, 'Params:', params);
     const result = await db.all(text, params);
@@ -151,9 +149,7 @@ export const dbQuery = async (text, params = []) => {
 };
 
 export const dbRun = async (text, params = []) => {
-  if (!db) {
-    throw new Error('Base de datos no inicializada');
-  }
+  const db = getDatabase();
   try {
     console.log('🔧 Ejecutando comando:', text, 'Params:', params);
     const result = await db.run(text, params);
@@ -171,9 +167,7 @@ export const dbRun = async (text, params = []) => {
 };
 
 export const dbGet = async (text, params = []) => {
-  if (!db) {
-    throw new Error('Base de datos no inicializada');
-  }
+  const db = getDatabase();
   try {
     console.log('🔍 Ejecutando get:', text, 'Params:', params);
     const result = await db.get(text, params);
@@ -188,9 +182,7 @@ export const dbGet = async (text, params = []) => {
 };
 
 export const dbAll = async (text, params = []) => {
-  if (!db) {
-    throw new Error('Base de datos no inicializada');
-  }
+  const db = getDatabase();
   try {
     console.log('🔍 Ejecutando all:', text, 'Params:', params);
     const result = await db.all(text, params);
